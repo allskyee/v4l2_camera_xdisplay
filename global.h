@@ -96,12 +96,6 @@ struct config {
 	int width;
 	int height;
 
-	int setup_mode; //0
-	int webcam_limit; //0 - no limit
-	int webcam_port; //8081
-	int webcam_localhost; //0 - do not restrict to localhost
-	int webcam_quality; //50 - from 0~100
-	int webcam_maxrate; //30 - fps
 	int v4l2_palette; //8
 		/*
 		# Values :
