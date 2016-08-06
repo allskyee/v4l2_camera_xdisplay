@@ -30,18 +30,24 @@ struct pipe {
 	void* priv; //a hidden datastructure
 };
 
+// called from src
 void* get_buf(struct pipe* p, void** pbuf);
 	// returns handle to buffer
 int push_buf(struct pipe* p, void* handle, int seq);
 	// returns number of messages successfully delivered
 	// if 0, then buffer is automatically recycled
+
+// called from dst
 void* pull_buf(struct pipe* p, int id, const void** buf, int* seq);
 	// returns handle of buffer (must use for return)
 void put_buf(struct pipe* p, void* handle);
 
+// called when start & destroy
 int  init_pipe(struct pipe* p, int n_dst, int q_depth, int buf_sz);
+	// returns 0 if success
 void close_pipe(struct pipe* p);
 
+// for debugging
 void print_pipe(struct pipe* p);
 
 #endif
