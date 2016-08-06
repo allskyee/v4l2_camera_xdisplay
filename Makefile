@@ -1,17 +1,16 @@
 CC=gcc
 CFLAGS=-I. -DMOTION_V4L2 
 LDFLAGS=-ljpeg -lc -lpthread -lX11
-SRCS=main.c video2.c pipe.c
-OBJS=$(SRCS:.c=.o)
+OCV=opencv-3.1.0/
 
-v4l2_camera_xdisplay : $(OBJS) global.h
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+v4l2_camera_xdisplay : main.c video2.c pipe.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-pipe : pipe.c pipe.h
-	$(CC) -o pipe pipe.c -DPIPE_TEST -lpthread
+ocv_fd_ot : main_fd_ot.c video2.c pipe.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-.c.o:
-	$(CC) $(CFLAGS) $(INCLUDES) -c $<  -o $@
+pipe : pipe.c 
+	$(CC) -o $@ $^ -DPIPE_TEST -lpthread
 
 clean:
 	rm -f *.o pipe v4l2_camera_xdisplay
