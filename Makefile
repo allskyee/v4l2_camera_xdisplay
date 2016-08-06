@@ -7,6 +7,9 @@ OBJS=$(SRCS:.c=.o)
 v4l2_camera_xdisplay : $(OBJS) global.h
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
+pipe : pipe.c pipe.h
+	$(CC) -o pipe pipe.c -DPIPE_TEST -lpthread
+
 .c.o:
 	$(CC) $(CFLAGS) $(INCLUDES) -c $<  -o $@
 
