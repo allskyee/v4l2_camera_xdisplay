@@ -6,14 +6,6 @@
 #include <string.h>
 #include <errno.h>
 
-#define VERSION "0.1"
-
-#define DEF_MAXSTREAMS          10  /* Maximum number of webcam clients per camera */
-#define DEF_MAXWEBQUEUE         10  /* Maximum number of webcam client in queue */
-
-#define DEF_TIMESTAMP           "%Y-%m-%d\\n%T"
-#define DEF_EVENTSTAMP          "%Y%m%d%H%M%S"
-
 #define VIDEO_PALETTE_GREY      1       /* Linear greyscale */
 #define VIDEO_PALETTE_HI240     2       /* High 240 cube (BT848) */
 #define VIDEO_PALETTE_RGB565    3       /* 565 16 bit RGB */
@@ -34,7 +26,6 @@
 #define VIDEO_PALETTE_COMPONENT 7       /* start of component entries */
 
 #define motion_log(lvl, i, fmt, args...) fprintf(stderr, fmt "\n", ##args)
-#define mymalloc malloc
 
 #ifdef __GNUC__
 #ifdef HAVE_ANSIDECL_H
@@ -53,28 +44,6 @@
 #define CAMERA_DEBUG            7   /* debug but not verbose */
 #define CAMERA_VERBOSE          8   /* verbose level */
 #define CAMERA_ALL              9   /* everything */
-
-
-
-/*
- * webcam stuff start
- */
-struct webcam_buffer {
-    unsigned char *ptr;
-    int ref;
-    long size;
-};
-
-struct webcam {
-    int socket;
-    FILE *fwrite;
-    struct webcam_buffer *tmpbuffer;
-    long filepos;
-    int nr;
-    unsigned long int last;
-    struct webcam *prev;
-    struct webcam *next;
-};
 
 /*
  * image stuff start
@@ -166,11 +135,9 @@ struct config {
 };
 
 struct context {
-	int stream_count;
 	int video_dev;
 
 	struct config conf;
-	struct webcam webcam;
 	struct images imgs;
 };
 
@@ -213,13 +180,6 @@ struct video_dev {
 /*
  * function definitions
  */
-int webcam_init(struct context *);
-void webcam_put(struct context *, unsigned char *);
-void webcam_stop(struct context *);
-
-int put_jpeg_yuv420p_memory(unsigned char *dest_image, int image_size,
-    unsigned char *input_image, int width, int height, int quality);
-
 extern unsigned short int debug_level;
 
 void vid_init(void);
@@ -229,9 +189,6 @@ int vid_v4l2_start(struct context *cnt);
 int vid_next(struct context* cnt, unsigned char* map);
 
 void vid_close(struct context *cnt);
-
-int put_picture_memory(struct context *cnt, unsigned char* dest_image, int image_size,
-                       unsigned char *image, int quality);
 
 int v4l2_next(struct context *cnt, struct video_dev *viddev, unsigned char *map, int width, int height);
 

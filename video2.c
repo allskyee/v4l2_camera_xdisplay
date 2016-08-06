@@ -1258,7 +1258,7 @@ case VIDEO_PALETTE_YUV422:
         dev = dev->next;
     }
 
-    dev = (struct video_dev*)mymalloc(sizeof(struct video_dev));
+    dev = (struct video_dev*)malloc(sizeof(struct video_dev));
     memset(dev, 0, sizeof(struct video_dev));
 
     dev->video_device = conf->video_device;

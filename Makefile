@@ -2,10 +2,9 @@ CC=gcc
 CFLAGS=-I. -DMOTION_V4L2 
 LDFLAGS=-ljpeg -lc -lpthread -lX11
 SRCS=main.c video2.c
-INC=global.h
 OBJS=$(SRCS:.c=.o)
 
-v4l2_camera_xdisplay : $(OBJS)
+v4l2_camera_xdisplay : $(OBJS) global.h
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
 .c.o:
