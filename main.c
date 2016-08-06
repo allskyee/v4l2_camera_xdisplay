@@ -52,7 +52,7 @@ void convert_yuv420_bgra8888(const unsigned char* yuv, unsigned char* rgb, int w
 #define WIDTH   640
 #define HEIGHT  480
 
-volatile render_thread_fps = 0;
+volatile int render_thread_fps = 0;
 
 void* render_thread(void* argv)
 {

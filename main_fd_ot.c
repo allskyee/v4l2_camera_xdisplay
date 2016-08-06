@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 
+#include <opencv2/objdetect/objdetect.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
 unsigned short int debug_level;
 
 volatile int finish = 0;
@@ -52,7 +55,7 @@ void convert_yuv420_bgra8888(const unsigned char* yuv, unsigned char* rgb, int w
 #define WIDTH   640
 #define HEIGHT  480
 
-volatile render_thread_fps = 0;
+volatile int render_thread_fps = 0;
 
 void* render_thread(void* argv)
 {
@@ -68,10 +71,12 @@ void* render_thread(void* argv)
 	struct timespec t_start;
 	int seq;
 
-    if(visual->class!=TrueColor) {
+#if 0
+    if(visual->class != TrueColor) {
 		fprintf(stderr, "Cannot handle non true color visual ...\n");
 		return (void*)-1;
     }
+#endif
 
 	clock_gettime(CLOCK_REALTIME, &t_start);
 	for (seq = 0; !finish; ) {
@@ -84,7 +89,7 @@ void* render_thread(void* argv)
 			continue;
 		}
 			
-		convert_yuv420_bgra8888(buf, image32, WIDTH, HEIGHT);
+		convert_yuv420_bgra8888((const unsigned char*)buf, (unsigned char*)image32, WIDTH, HEIGHT);
 
 		XPutImage(display, window, DefaultGC(display, 0), 
 							ximage, 0, 0, 0, 0, WIDTH, HEIGHT);
@@ -108,6 +113,20 @@ void* render_thread(void* argv)
 
 		seq++;
 	}
+
+	return NULL;
+}
+
+volatile int face_detection_thread_fps = 0;
+
+void* face_detection_thread(void* argv)
+{
+	int seq;
+
+	for (seq = 0; !finish; ) {
+	}
+
+	return NULL;
 }
 
 int main(int argc, char* argv[])
@@ -117,7 +136,6 @@ int main(int argc, char* argv[])
 	int seq, ret, seq_abs;
 	struct timespec t_start;
 	pthread_t threads[3] = {0};
-
 
 	/* 
 	 * setup signal
@@ -130,7 +148,7 @@ int main(int argc, char* argv[])
 	/* 
 	 * setup pipe
 	 */
-	if (init_pipe(&p, 1, 2, WIDTH * HEIGHT * 2)) {
+	if (init_pipe(&p, 2, 2, WIDTH * HEIGHT * 2)) {
 		fprintf(stderr, "unable to setup pipe\n");
 		exit(0);
 	}
@@ -140,6 +158,10 @@ int main(int argc, char* argv[])
 	 */
 	if (pthread_create(&threads[0], NULL, render_thread, &p)) {
 		fprintf(stderr, "unable to start render thread\n");
+		exit(0);
+	}
+	if (pthread_create(&threads[1], NULL, face_detection_thread, &p)) {
+		fprintf(stderr, "unable to start face detection thread\n");
 		exit(0);
 	}
 
@@ -179,7 +201,7 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
-		vid_next(&ctxt, buf);
+		vid_next(&ctxt, (unsigned char*)buf);
 		push_buf(&p, h, seq_abs);
 
 		if (seq == 30) {

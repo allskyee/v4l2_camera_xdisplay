@@ -9,7 +9,7 @@ int init_queue(struct queue* q, int n)
 	int default_sz = sizeof(q->_elems) / sizeof(q->_elems[0]);
 	
 	q->elems = n <= default_sz ? &q->_elems[0] : 
-		malloc(n * sizeof(q->elems[0]));
+		(void**)malloc(n * sizeof(q->elems[0]));
 	if (q->elems == NULL)
 		return -1;
 
@@ -71,8 +71,8 @@ struct pipe_elem {
 int init_pipe(struct pipe* p, int n_dst, int q_depth, int buf_sz)
 {
 	int free_bufs = n_dst * q_depth;
-	struct pipe_elem* msg_all = 
-		malloc(free_bufs * (sizeof(msg_all[0]) + buf_sz));
+	struct pipe_elem* msg_all = (struct pipe_elem*)malloc(
+		free_bufs * (sizeof(msg_all[0]) + buf_sz));
 	void* buf_ptr;
 	int def_dst_n, i;
 
@@ -88,7 +88,7 @@ int init_pipe(struct pipe* p, int n_dst, int q_depth, int buf_sz)
 	// initialize dst
 	def_dst_n = sizeof(p->_dst) / sizeof(p->_dst[0]);
 	p->dst = n_dst < def_dst_n ? &p->_dst[0] :
-		malloc(n_dst * sizeof(p->dst[0]));
+		(struct queue*)malloc(n_dst * sizeof(p->dst[0]));
 	if (!p->dst)
 		goto free_src;
 	for (i = 0; i < n_dst; i++) {
@@ -158,7 +158,7 @@ void* get_buf(struct pipe* p, void** pbuf)
 
 int push_buf(struct pipe* p, void* handle, int seq)
 {
-	struct pipe_elem* elem = handle;
+	struct pipe_elem* elem = (struct pipe_elem*)handle;
 	int i, ret;
 
 	assert(handle);
@@ -210,7 +210,7 @@ unlock :
 
 void put_buf(struct pipe* p, void* handle)
 {
-	struct pipe_elem* elem = handle;
+	struct pipe_elem* elem = (struct pipe_elem*)handle;
 
 	// lock
 	pthread_spin_lock(&p->lock);
@@ -227,7 +227,7 @@ void put_buf(struct pipe* p, void* handle)
 
 void print_pipe_elem(void* p)
 {
-	struct pipe_elem* elem = p;
+	struct pipe_elem* elem = (struct pipe_elem*)p;
 
 	printf(" %p : %p %d %d\n", elem, elem->buf, 
 		elem->seq, elem->ref_cnt);
