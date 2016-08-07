@@ -11,7 +11,7 @@ v4l2_camera_xdisplay : main.c video2.c pipe.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 v4l2_ocv_fd_ot : main_fd_ot.cpp video2.c pipe.c
-	$(CXX) $(CFLAGS) -DOCV_PATH=\"$(OCV_PATH)\" $(OCV_CFLAGS) -o $@ $^ $(LDFLAGS) $(OCV_LDFLAGS) 
+	$(CXX) $(CFLAGS) -g -DOCV_PATH=\"$(OCV_PATH)\" $(OCV_CFLAGS) -o $@ $^ $(LDFLAGS) $(OCV_LDFLAGS) 
 
 pipe : pipe.c 
 	$(CC) -o $@ $^ -DPIPE_TEST -lpthread
