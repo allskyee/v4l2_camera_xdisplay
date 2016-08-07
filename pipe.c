@@ -97,7 +97,7 @@ int init_pipe(struct pipe* p, int n_dst, int q_depth, int buf_sz)
 	}
 
 	// init spinlock
-	if (pthread_spin_init(&p->lock, PTHREAD_PROCESS_SHARED)) 
+	if (pthread_spin_init(&p->lock, PTHREAD_PROCESS_PRIVATE)) 
 		goto free_dst;
 
 	// push buffers onto src

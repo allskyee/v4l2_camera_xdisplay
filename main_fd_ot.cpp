@@ -11,8 +11,8 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 
-#include <opencv2/objdetect/objdetect.hpp>
-#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/objdetect.hpp>
+#include <opencv2/imgproc.hpp>
 
 unsigned short int debug_level;
 
@@ -57,10 +57,17 @@ void convert_yuv420_bgra8888(const unsigned char* yuv, unsigned char* rgb, int w
 
 volatile int render_thread_fps = 0;
 
+#define FACES_MAX_N	10
+pthread_spinlock_t faces_lock;
+cv::Rect faces_all[FACES_MAX_N];
+volatile int faces_n = 0;
+volatile int faces_updated = 0;
+
 void* render_thread(void* argv)
 {
 	struct pipe* p = (struct pipe*)argv;
     static char image32[WIDTH*HEIGHT*4];
+    static char image16[WIDTH*HEIGHT*2];
     Display* display = XOpenDisplay(NULL);
     Visual* visual = DefaultVisual(display, 0);
     Window window = XCreateSimpleWindow(display, 
@@ -70,8 +77,12 @@ void* render_thread(void* argv)
     XMapWindow(display, window);
 	struct timespec t_start;
 	int seq;
+	cv::Mat image(HEIGHT, WIDTH, 0, CV_MAT_CONT_FLAG);
+
+	image.data = (uchar*)image16;
 
 #if 0
+	// doesn't compile with g++
     if(visual->class != TrueColor) {
 		fprintf(stderr, "Cannot handle non true color visual ...\n");
 		return (void*)-1;
@@ -80,7 +91,7 @@ void* render_thread(void* argv)
 
 	clock_gettime(CLOCK_REALTIME, &t_start);
 	for (seq = 0; !finish; ) {
-		int buf_seq;
+		int buf_seq, i;
 		const void* buf;
 		void* h = pull_buf(p, 0, &buf, &buf_seq);
 
@@ -88,13 +99,20 @@ void* render_thread(void* argv)
 			usleep(1000);
 			continue;
 		}
+
+		memcpy(image16, buf, WIDTH * HEIGHT * 2);
+		put_buf(p, h);
+
+		pthread_spin_lock(&faces_lock);
+		for (i = 0; i < faces_n; i++) 
+			cv::rectangle(image, faces_all[i], 255);
+		pthread_spin_unlock(&faces_lock);
 			
-		convert_yuv420_bgra8888((const unsigned char*)buf, (unsigned char*)image32, WIDTH, HEIGHT);
+		convert_yuv420_bgra8888((const unsigned char*)image16, 
+			(unsigned char*)image32, WIDTH, HEIGHT);
 
 		XPutImage(display, window, DefaultGC(display, 0), 
 							ximage, 0, 0, 0, 0, WIDTH, HEIGHT);
-			
-		put_buf(p, h);
 
 		if (seq == 30) {
 			struct timespec t_now;
@@ -117,13 +135,67 @@ void* render_thread(void* argv)
 	return NULL;
 }
 
-volatile int face_detection_thread_fps = 0;
+// grabbed from
+// http://docs.opencv.org/3.1.0/db/d28/tutorial_cascade_classifier.html#gsc.tab=0
 
 void* face_detection_thread(void* argv)
 {
-	int seq;
+	struct pipe* p = (struct pipe*)argv;
+	char xml_path[128];
+	cv::CascadeClassifier face_cascade;
+	cv::Mat image(HEIGHT, WIDTH, (int)NULL, CV_MAT_CONT_FLAG);
+	struct timespec t_start;
 
-	for (seq = 0; !finish; ) {
+	sprintf(xml_path, "%s/%s", OCV_PATH, 
+		"share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml");
+
+	if (!face_cascade.load(xml_path)) {
+		fprintf(stderr, "Error loading cascade!!\n");
+		return (void*)-1;
+	}
+
+	clock_gettime(CLOCK_REALTIME, &t_start);
+	while (!finish) {
+		struct timespec t_start, t_end;
+		int buf_seq, t_ms;
+		const void* buf;
+		void* h;
+		std::vector<cv::Rect> faces;
+
+		clock_gettime(CLOCK_REALTIME, &t_start);
+
+		// since q_depth is 2, flush out 2 before starting
+		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
+			usleep(1000);
+		put_buf(p, h);
+		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
+			usleep(1000);
+		put_buf(p, h);
+
+		// obtain frame
+		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
+			usleep(1000);
+
+		image.data = (uchar*)buf;
+		face_cascade.detectMultiScale( image, faces, 1.1, 2, 
+			cv::CASCADE_SCALE_IMAGE, cv::Size(30, 30) );
+
+		pthread_spin_lock(&faces_lock);
+		faces_n = faces.size() < FACES_MAX_N ? faces.size() : FACES_MAX_N;
+		faces_updated = 1;
+		for (int i = 0; i < faces_n; i++) 
+			faces_all[i] = faces[i];
+		pthread_spin_unlock(&faces_lock);
+
+		put_buf(p, h);
+
+		clock_gettime(CLOCK_REALTIME, &t_end);
+		t_ms = (t_end.tv_sec - t_start.tv_sec) * 1e3;
+		t_ms += ((t_end.tv_nsec - t_start.tv_nsec) / 1e6);
+
+		//face_detection_thread_fps = (seq * (int)1e3) / t_ms;
+		if (t_ms < 1000) //detect every second
+			usleep(1000 * (1000 - t_ms));
 	}
 
 	return NULL;
@@ -138,11 +210,19 @@ int main(int argc, char* argv[])
 	pthread_t threads[3] = {0};
 
 	/* 
+	 * setup locks
+	 */
+	if (pthread_spin_init(&faces_lock, PTHREAD_PROCESS_PRIVATE))  {
+        fprintf(stderr, "unable to setup spinlock\n");
+		exit(-1);
+	}
+
+	/* 
 	 * setup signal
 	 */
 	if (signal(SIGINT,  sigint_handler) == SIG_ERR) {
         fprintf(stderr, "unable to register signal handler\n");
-        exit(0);
+        exit(-1);
     }
 
 	/* 
@@ -150,7 +230,7 @@ int main(int argc, char* argv[])
 	 */
 	if (init_pipe(&p, 2, 2, WIDTH * HEIGHT * 2)) {
 		fprintf(stderr, "unable to setup pipe\n");
-		exit(0);
+		exit(-1);
 	}
 
 	/*
@@ -158,11 +238,11 @@ int main(int argc, char* argv[])
 	 */
 	if (pthread_create(&threads[0], NULL, render_thread, &p)) {
 		fprintf(stderr, "unable to start render thread\n");
-		exit(0);
+		exit(-1);
 	}
 	if (pthread_create(&threads[1], NULL, face_detection_thread, &p)) {
 		fprintf(stderr, "unable to start face detection thread\n");
-		exit(0);
+		exit(-1);
 	}
 
 	/* 
@@ -185,7 +265,7 @@ int main(int argc, char* argv[])
 	ret = vid_v4l2_start(&ctxt);
 	if (ret == -1) {
 		fprintf(stderr, "unable to open start v4l2\n");
-		exit(0);
+		exit(-1);
 	}
 
 	/* 
@@ -212,7 +292,8 @@ int main(int argc, char* argv[])
 			t_ms = (t_now.tv_sec - t_start.tv_sec) * 1e3;
 			t_ms += ((t_now.tv_nsec - t_start.tv_nsec) / 1e6);
 
-			printf("%d \t %d \n", (seq * (int)1e3) / t_ms, render_thread_fps);
+			printf("%d \t %d\n", (seq * (int)1e3) / t_ms, 
+				render_thread_fps);
 
 			t_start = t_now;
 
