@@ -164,22 +164,18 @@ void* face_detection_thread(void* argv)
 
 		clock_gettime(CLOCK_REALTIME, &t_start);
 
-		// since q_depth is 2, flush out 2 before starting
-		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
-			usleep(1000);
-		put_buf(p, h);
-		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
-			usleep(1000);
-		put_buf(p, h);
+		flush_buf(p, 1);
 
 		// obtain frame
-		while(!(h = pull_buf(p, 0, &buf, &buf_seq))) 
-			usleep(1000);
+		while(!(h = pull_buf(p, 1, &buf, &buf_seq))) 
+			usleep(5000);
 
+		// detect faces
 		image.data = (uchar*)buf;
 		face_cascade.detectMultiScale( image, faces, 1.1, 2, 
 			cv::CASCADE_SCALE_IMAGE, cv::Size(30, 30) );
 
+		// copy faces content onto render thread
 		pthread_spin_lock(&faces_lock);
 		faces_n = faces.size() < FACES_MAX_N ? faces.size() : FACES_MAX_N;
 		faces_updated = 1;
@@ -187,15 +183,18 @@ void* face_detection_thread(void* argv)
 			faces_all[i] = faces[i];
 		pthread_spin_unlock(&faces_lock);
 
+		// put frame
 		put_buf(p, h);
 
+		printf("%d faces detected\n", faces.size());
+
+		// calculate time incurred and sleep if appropriate
 		clock_gettime(CLOCK_REALTIME, &t_end);
 		t_ms = (t_end.tv_sec - t_start.tv_sec) * 1e3;
 		t_ms += ((t_end.tv_nsec - t_start.tv_nsec) / 1e6);
 
-		//face_detection_thread_fps = (seq * (int)1e3) / t_ms;
-		if (t_ms < 1000) //detect every second
-			usleep(1000 * (1000 - t_ms));
+		if (t_ms < 5000) //detect every second
+			usleep(1000 * (5000 - t_ms));
 	}
 
 	return NULL;

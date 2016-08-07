@@ -225,6 +225,29 @@ void put_buf(struct pipe* p, void* handle)
 	pthread_spin_unlock(&p->lock);
 }
 
+void flush_buf(struct pipe* p, int id)
+{
+	struct pipe_elem* elem;
+
+	// lock
+	pthread_spin_lock(&p->lock);
+
+	if (id < 0 || id >= p->n_dst)
+		goto unlock;
+
+	while (!dequeue(&p->dst[id], (void**)&elem)) {
+		elem->ref_cnt--;
+		if (elem->ref_cnt <= 0) {
+			assert(elem->ref_cnt >= 0);
+			assert(!enqueue(&p->src, elem));
+		}
+	}
+
+unlock : 
+	// unlock
+	pthread_spin_unlock(&p->lock);
+}
+
 void print_pipe_elem(void* p)
 {
 	struct pipe_elem* elem = (struct pipe_elem*)p;
