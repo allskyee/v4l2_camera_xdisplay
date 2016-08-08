@@ -83,12 +83,8 @@ void convert_yuv420_bgr888(const unsigned char* yuv, unsigned char* rgb, int wid
 
 volatile int render_thread_fps = 0;
 
-#define OBJS_MAX_N	10
-pthread_spinlock_t objs_lock;
-struct _obj_traj {
-	cv::Rect rect;
-	int valid;
-} obj_traj[OBJS_MAX_N];
+pthread_spinlock_t obj_lock;
+cv::Rect obj_rect;
 
 void* render_thread(void* argv)
 {
@@ -130,13 +126,9 @@ void* render_thread(void* argv)
 		memcpy(image16, buf, WIDTH * HEIGHT * 2);
 		put_buf(p, h);
 
-		pthread_spin_lock(&objs_lock);
-		for (i = 0; i < OBJS_MAX_N; i++) {
-			if (!obj_traj[i].valid)
-				continue;
-			cv::rectangle(image, obj_traj[i].rect, 255);
-		}
-		pthread_spin_unlock(&objs_lock);
+		pthread_spin_lock(&obj_lock);
+		cv::rectangle(image, obj_rect, 255);
+		pthread_spin_unlock(&obj_lock);
 			
 		convert_yuv420_bgra8888((const unsigned char*)image16, 
 			(unsigned char*)image32, WIDTH, HEIGHT);
@@ -180,6 +172,9 @@ void* tracker_thread(void* argv)
 	cv::Mat frame8(HEIGHT, WIDTH, CV_8UC1);
 	cv::Mat frame24(HEIGHT, WIDTH, CV_8UC3, image24);
 
+	cv::Rect2d face_rect2d;
+	cv::Ptr<cv::Tracker> tracker;
+
 	sprintf(xml_path, "%s/%s", OCV_PATH, 
 		"share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml");
 
@@ -188,95 +183,86 @@ void* tracker_thread(void* argv)
 		return (void*)-1;
 	}
 
+	tracker = cv::Tracker::create("KCF");
+	if (tracker == NULL) {
+		fprintf(stderr, "unble to create tracker\n");
+		return (void*)-1;
+	}
+
+	/* 
+	 * pull frame and detect objects
+	 */
+
 	while (!finish) {
-		int buf_seq, i, objs_n;
+		int buf_seq, i;
 		const void* buf;
 		void* h;
+		std::vector<cv::Rect> faces_rect;
 
-		std::vector<cv::Rect> objs_rect;
-
-		cv::MultiTracker trackers("TLD");
-		std::vector<cv::Rect2d> objs_rect2d;
-
-		/* 
-		 * pull frame and detect objects
-		 */
-		if (!(h = pull_buf(p, 1, &buf, &buf_seq)))  {
+		if (!(h = pull_buf(p, 1, &buf, &buf_seq))) {
 			usleep(1000);
 			continue;
 		}
 
 		frame8.data = (uchar*)buf;
-		face_cascade.detectMultiScale( frame8, objs_rect, 1.1, 2, 
+		face_cascade.detectMultiScale( frame8, faces_rect, 1.1, 2, 
 			cv::CASCADE_SCALE_IMAGE, cv::Size(30, 30) );
 
-		if ((objs_n = objs_rect.size()) == 0) { 
+		if (faces_rect.size()) {
+			printf("detected %d faces\n", faces_rect.size());
+
+			face_rect2d = faces_rect[0];
+
+			convert_yuv420_bgr888((const unsigned char*)buf, \
+							(unsigned char*)image24, WIDTH, HEIGHT);
+
 			put_buf(p, h);
+			break;
+		}
+
+		put_buf(p, h);
+	}
+
+	/* 
+	 * tracker 
+	 */
+	if (finish) {
+		return NULL;
+	}
+
+	if (!(tracker->init(frame24, face_rect2d))) {
+		fprintf(stderr, "unable to init tracker\n");
+		return (void*)-1;
+	}
+
+	pthread_spin_lock(&obj_lock);
+	obj_rect = face_rect2d;
+	pthread_spin_unlock(&obj_lock);
+
+	while (!finish) {
+		int buf_seq, i;
+		const void* buf;
+		void* h;
+
+		if (!(h = pull_buf(p, 1, &buf, &buf_seq)))  {
+			usleep(1000);
 			continue;
 		}
-		objs_rect2d.resize(objs_n);
 
-		printf("detected %d objects\n", objs_n);
-
-		convert_yuv420_bgr888((const unsigned char*)buf, \
+		convert_yuv420_bgr888((const unsigned char*)buf, 
 			(unsigned char*)image24, WIDTH, HEIGHT);
 		put_buf(p, h);
 
-		/* 
-		 * initialize tracker with ROIs
-		 */
-		pthread_spin_lock(&objs_lock);
-		for (i = 0; i < objs_n; i++) {
-			obj_traj[i].valid = 1;
-			obj_traj[i].rect = objs_rect[i];
+		if (!tracker->update(frame24, face_rect2d)) {
+			printf("unable to track\n");
+			break;
 		}
-		pthread_spin_unlock(&objs_lock);
-
-		for (i = 0; i < objs_n; i++) {
-			objs_rect2d[i] = objs_rect[i];
-			printf("%f %f %f %f\n", objs_rect2d[i].x, objs_rect2d[i].y, 
-				objs_rect2d[i].width, objs_rect2d[i].height);
-		}
-
-		trackers.add(frame24, objs_rect2d);
-
-		printf("start tracking\n");
-
-		/* 
-		 * pull frame and track objects
-		 */
-		while (!finish) {
-
-			if (!(h = pull_buf(p, 1, &buf, &buf_seq)))  {
-				usleep(1000);
-				continue;
-			}
-
-			convert_yuv420_bgr888((const unsigned char*)buf, 
-				(unsigned char*)image24, WIDTH, HEIGHT);
-			put_buf(p, h);
-
-			trackers.update(frame24);
 			
-			//printf("tracked %d\n", trackers.objects.size());
+		//printf("tracked %d\n", trackers.objects.size());
 
-			pthread_spin_lock(&objs_lock);
-			for (i = 0; i < trackers.objects.size(); i++) {
-				obj_traj[i].valid = 1;
-				obj_traj[i].rect = trackers.objects[i];
-			}
-			pthread_spin_unlock(&objs_lock);
-		}
-
-		/* 
-		 * giving up ... destroy all tracker objects
-		 */
-		pthread_spin_lock(&objs_lock);
-		for (i = 0; i < objs_n; i++) {
-			obj_traj[i].valid = 0;
-			// TODO : clear the line queues as well
-		}
-		pthread_spin_unlock(&objs_lock);
+		pthread_spin_lock(&obj_lock);
+		obj_rect = face_rect2d;
+		pthread_spin_unlock(&obj_lock);
 	}
 
 	return NULL;
@@ -294,11 +280,11 @@ int main(int argc, char* argv[])
 	/* 
 	 * setup locks
 	 */
-	if (pthread_spin_init(&objs_lock, PTHREAD_PROCESS_PRIVATE))  {
+	if (pthread_spin_init(&obj_lock, PTHREAD_PROCESS_PRIVATE))  {
         fprintf(stderr, "unable to setup spinlock\n");
 		exit(-1);
 	}
-	memset(&obj_traj, 0, sizeof(obj_traj));
+	memset(&obj_rect, 0, sizeof(obj_rect));
 
 	/* 
 	 * setup signal
