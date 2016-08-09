@@ -16,5 +16,8 @@ v4l2_ocv_fd_ot : main_fd_ot.cpp video2.c pipe.c
 pipe : pipe.c 
 	$(CC) -o $@ $^ -DPIPE_TEST -lpthread
 
+file : file.cpp
+	$(CXX) $(CFLAGS) -DOCV_PATH=\"$(OCV_PATH)\" $(OCV_CFLAGS) -o $@ $^ $(LDFLAGS) $(OCV_LDFLAGS) 
+
 clean:
 	rm -f *.o pipe v4l2_camera_xdisplay
